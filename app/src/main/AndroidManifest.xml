@@ -24,7 +24,7 @@
         </activity>
 
         <service
-            android:name=".CastService"
+            android:name=".CastService_"
             android:process=":remote"
             android:enabled="true"
             android:exported="true" >

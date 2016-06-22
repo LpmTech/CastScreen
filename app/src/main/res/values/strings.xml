@@ -21,6 +21,7 @@
     </string-array>
 
     <string-array name="bitrate_options">
+        <item>12 Mbps</item>
         <item>6 Mbps</item>
         <item>4 Mbps</item>
         <item>2 Mbps</item>

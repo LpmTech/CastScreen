@@ -76,6 +76,7 @@ public class MainActivity extends Activity {
     };
 
     private static final int[] BITRATE_OPTIONS = {
+            12288000, // 12 Mbps
             6144000, // 6 Mbps
             4096000, // 4 Mbps
             2048000, // 2 Mbps
@@ -380,7 +381,7 @@ public class MainActivity extends Activity {
 
     private void startService() {
         if (mResultCode != 0 && mResultData != null && mReceiverIp != null) {
-            Intent intent = new Intent(this, CastService.class);
+            Intent intent = new Intent(this, CastService_.class);
             intent.putExtra(Common.EXTRA_RESULT_CODE, mResultCode);
             intent.putExtra(Common.EXTRA_RESULT_DATA, mResultData);
             intent.putExtra(Common.EXTRA_RECEIVER_IP, mReceiverIp);
@@ -393,7 +394,7 @@ public class MainActivity extends Activity {
             startService(intent);
             bindService(intent, mServiceConnection, Context.BIND_AUTO_CREATE);
         } else {
-            Intent intent = new Intent(this, CastService.class);
+            Intent intent = new Intent(this, CastService_.class);
             startService(intent);
             bindService(intent, mServiceConnection, Context.BIND_AUTO_CREATE);
         }
@@ -455,6 +456,7 @@ public class MainActivity extends Activity {
                         }
                     } catch (SocketTimeoutException e) {
                     }
+
 
                     Thread.sleep(3000);
                 }
