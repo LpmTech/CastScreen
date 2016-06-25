@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.yschi.castscreen;
+package com.yschi.castscreen.service.cast;
 
 import android.app.Notification;
 import android.app.NotificationManager;
@@ -39,20 +39,26 @@ import android.util.Log;
 import android.view.Surface;
 import android.view.WindowManager;
 
+import com.yschi.castscreen.Common;
+import com.yschi.castscreen.IvfWriter;
+import com.yschi.castscreen.R;
+import com.yschi.castscreen.common.State;
+import com.yschi.castscreen.service.cast.managers.DefaultCast;
+import com.yschi.castscreen.service.cast.writers.IWriterWrapper;
+import com.yschi.castscreen.service.cast.writers.IvfWriterWrapper;
+import com.yschi.castscreen.service.cast.writers.SocketOutputWrapper;
+
 import org.androidannotations.annotations.Background;
 import org.androidannotations.annotations.EService;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Locale;
 
 @EService
 public class CastService extends Service {
@@ -106,7 +112,6 @@ public class CastService extends Service {
     //private int mTrackIndex = -1;
     private ServerSocket mServerSocket;
     private Socket mSocket;
-    private OutputStream mSocketOutputStream;
     private IvfWriter mIvfWriter;
 
     private State mState = State.STOP;
@@ -122,13 +127,8 @@ public class CastService extends Service {
     private int _screen_width;
     private int _screen_height;
     private int _screen_dpi;
-
-    /*private Runnable mDrainEncoderRunnable = new Runnable() {
-        @Override
-        public void run() {
-            drainEncoder();
-        }
-    };*/
+    private DefaultCast mCastManager;
+    private IWriterWrapper mWriterWrapper;
 
     private class ServiceHandlerCallback implements Handler.Callback {
         @Override
@@ -178,8 +178,8 @@ public class CastService extends Service {
         windowManager.getDefaultDisplay().getMetrics(metrics);
 
         _screen_dpi = metrics.densityDpi;
-        _screen_width = metrics.widthPixels;
-        _screen_height = metrics.heightPixels;
+        _screen_width = metrics.widthPixels / 2;
+        _screen_height = metrics.heightPixels / 2;
 
         mMediaProjectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
         mBroadcastIntentFilter = new IntentFilter();
@@ -208,40 +208,24 @@ public class CastService extends Service {
         if (mReceiverIp == null) {
             return START_NOT_STICKY;
         }
-        //if (mResultCode != Activity.RESULT_OK || mResultData == null) {
-        //    Log.e(TAG, "Failed to start service, mResultCode: " + mResultCode + ", mResultData: " + mResultData);
-        //    return START_NOT_STICKY;
-        //}
-        mSelectedWidth = intent.getIntExtra(Common.EXTRA_SCREEN_WIDTH, Common.DEFAULT_SCREEN_WIDTH);
-        mSelectedHeight = intent.getIntExtra(Common.EXTRA_SCREEN_HEIGHT, Common.DEFAULT_SCREEN_HEIGHT);
-        mSelectedDpi = intent.getIntExtra(Common.EXTRA_SCREEN_DPI, Common.DEFAULT_SCREEN_DPI);
+
         mSelectedBitrate = intent.getIntExtra(Common.EXTRA_VIDEO_BITRATE, Common.DEFAULT_VIDEO_BITRATE);
-        mSelectedFormat = intent.getStringExtra(Common.EXTRA_VIDEO_FORMAT);
+        mSelectedFormat = MediaFormat.MIMETYPE_VIDEO_AVC;
 
         mSelectedWidth = _screen_width;
         mSelectedHeight = _screen_height;
         mSelectedDpi = _screen_dpi;
 
-        if (mSelectedFormat == null) {
-            mSelectedFormat = Common.DEFAULT_VIDEO_MIME_TYPE;
+        Log.d(TAG, "Start with client mode");
+        if (!createSocket()) {
+            Log.e(TAG, "Failed to create socket to receiver, ip: " + mReceiverIp);
+            return START_NOT_STICKY;
         }
-        if (mReceiverIp.length() <= 0) {
-            Log.d(TAG, "Start with listen mode");
-            if (!createServerSocket()) {
-                Log.e(TAG, "Failed to create socket to receiver, ip: " + mReceiverIp);
-                return START_NOT_STICKY;
-            }
-        } else {
-            Log.d(TAG, "Start with client mode");
-            if (!createSocket()) {
-                Log.e(TAG, "Failed to create socket to receiver, ip: " + mReceiverIp);
-                return START_NOT_STICKY;
-            }
-            if (!startScreenCapture()) {
-                Log.e(TAG, "Failed to start capture screen");
-                return START_NOT_STICKY;
-            }
+        if (!startScreenCapture()) {
+            Log.e(TAG, "Failed to start capture screen");
+            return START_NOT_STICKY;
         }
+
         return START_STICKY;
     }
 
@@ -288,14 +272,7 @@ public class CastService extends Service {
     private void startRecording() {
         Log.d(TAG, "startRecording");
         prepareVideoEncoder();
-
-        //try {
-        //    mMuxer = new MediaMuxer("/sdcard/video.mp4", MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-        //} catch (IOException ioe) {
-        //    throw new RuntimeException("MediaMuxer creation failed", ioe);
-        //}
-
-        // Start the video input.
+        mCastManager.initialize(mVideoEncoder);
 
         Log.d(TAG, "startRecording: " + mSelectedWidth + " " + mSelectedHeight + " " + mSelectedDpi);
         mVirtualDisplay = mMediaProjection.createVirtualDisplay("Recording Display", mSelectedWidth,
@@ -307,7 +284,6 @@ public class CastService extends Service {
     }
 
     private void prepareVideoEncoder() {
-        mVideoBufferInfo = new MediaCodec.BufferInfo();
         MediaFormat format = MediaFormat.createVideoFormat(mSelectedFormat, mSelectedWidth, mSelectedHeight);
         int frameRate = Common.DEFAULT_VIDEO_FPS;
 
@@ -334,103 +310,11 @@ public class CastService extends Service {
 
     @Background
     protected void drainEncoder() {
-        mState = State.START;
-        //mDrainHandler.removeCallbacks(mDrainEncoderRunnable);
-        while (State.START.equals(mState)) {
-            while (true) {
-                int bufferIndex = MediaCodec.INFO_TRY_AGAIN_LATER;
-
-                try {
-                    bufferIndex = mVideoEncoder.dequeueOutputBuffer(mVideoBufferInfo, 0);
-                } catch (Exception e) {
-                    stopScreenCapture();
-                }
-
-                if (bufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                    // nothing available yet
-                    break;
-                } else if (bufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    // should happen before receiving buffers, and should only happen once
-                    //if (mTrackIndex >= 0) {
-                    //    throw new RuntimeException("format changed twice");
-                    //}
-                    //mTrackIndex = mMuxer.addTrack(mVideoEncoder.getOutputFormat());
-                    //if (!mMuxerStarted && mTrackIndex >= 0) {
-                    //    mMuxer.start();
-                    //    mMuxerStarted = true;
-                    //}
-                } else if (bufferIndex < 0) {
-                    // not sure what's going on, ignore it
-                } else {
-                    ByteBuffer encodedData = mVideoEncoder.getOutputBuffer(bufferIndex);
-                    if (encodedData == null) {
-                        throw new RuntimeException("couldn't fetch buffer at index " + bufferIndex);
-                    }
-                    // Fixes playability issues on certain h264 decoders including omxh264dec on raspberry pi
-                    // See http://stackoverflow.com/a/26684736/4683709 for explanation
-                    //if ((mVideoBufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-                    //    mVideoBufferInfo.size = 0;
-                    //}
-
-                    //Log.d(TAG, "Video buffer offset: " + mVideoBufferInfo.offset + ", size: " + mVideoBufferInfo.size);
-                    if (mVideoBufferInfo.size != 0) {
-                        encodedData.position(mVideoBufferInfo.offset);
-                        encodedData.limit(mVideoBufferInfo.offset + mVideoBufferInfo.size);
-                        if (mSocketOutputStream != null) {
-                            try {
-                                byte[] b = new byte[encodedData.remaining()];
-                                encodedData.get(b);
-                                if (mIvfWriter != null) {
-                                    mIvfWriter.writeFrame(b, mVideoBufferInfo.presentationTimeUs);
-                                } else {
-                                    mSocketOutputStream.write(b);
-                                }
-                            } catch (IOException e) {
-                                Log.d(TAG, "Failed to write data to socket, stop casting");
-                                e.printStackTrace();
-                                stopScreenCapture();
-                                return;// false;
-                            }
-                        }
-                    /*
-                    if (mMuxerStarted) {
-                        encodedData.position(mVideoBufferInfo.offset);
-                        encodedData.limit(mVideoBufferInfo.offset + mVideoBufferInfo.size);
-                        try {
-                            if (mSocketOutputStream != null) {
-                                byte[] b = new byte[encodedData.remaining()];
-                                encodedData.get(b);
-                                mSocketOutputStream.write(b);
-                            }
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                        mMuxer.writeSampleData(mTrackIndex, encodedData, mVideoBufferInfo);
-                    } else {
-                        // muxer not started
-                    }
-                    */
-                    }
-
-                    mVideoEncoder.releaseOutputBuffer(bufferIndex, false);
-
-                    if ((mVideoBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        break;
-                    }
-                }
-            }
-            try {
-                Thread.sleep(10);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-
-        //mDrainHandler.postDelayed(mDrainEncoderRunnable, 10);
-        return;// true;
+        mCastManager.startRecording();
+        return;
     }
 
-    private void stopScreenCapture() {
+    public void stopScreenCapture() {
         dismissNotification();
         releaseEncoders();
         closeSocket();
@@ -442,17 +326,6 @@ public class CastService extends Service {
 
     private void releaseEncoders() {
         mState = State.STOP;
-        //mDrainHandler.removeCallbacks(mDrainEncoderRunnable);
-        /*
-        if (mMuxer != null) {
-            if (mMuxerStarted) {
-                mMuxer.stop();
-            }
-            mMuxer.release();
-            mMuxer = null;
-            mMuxerStarted = false;
-        }
-        */
         try {
             if (mVideoEncoder != null) {
                 mVideoEncoder.stop();
@@ -491,86 +364,6 @@ public class CastService extends Service {
         //mTrackIndex = -1;
     }
 
-    private boolean createServerSocket() {
-        Thread th = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    mServerSocket = new ServerSocket(Common.VIEWER_PORT);
-                    while (!Thread.currentThread().isInterrupted() && !mServerSocket.isClosed()) {
-                        mSocket = mServerSocket.accept();
-                        CommunicationThread commThread = new CommunicationThread(mSocket);
-                        new Thread(commThread).start();
-                    }
-                } catch (IOException e) {
-                    Log.e(TAG, "Failed to create server socket or server socket error");
-                    e.printStackTrace();
-                }
-            }
-        });
-        th.start();
-        return true;
-    }
-
-    class CommunicationThread implements Runnable {
-        private Socket mClientSocket;
-
-        public CommunicationThread(Socket clientSocket) {
-            mClientSocket = clientSocket;
-        }
-
-        public void run() {
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    BufferedReader input = new BufferedReader(new InputStreamReader(mClientSocket.getInputStream()));
-                    String data = input.readLine();
-                    Log.d(TAG, "Got data from socket: " + data);
-                    if (data == null || !data.equalsIgnoreCase("mirror")) {
-                        mClientSocket.close();
-                        return;
-                    }
-                    mSocketOutputStream = mClientSocket.getOutputStream();
-                    OutputStreamWriter osw = new OutputStreamWriter(mSocketOutputStream);
-                    osw.write(String.format(HTTP_MESSAGE_TEMPLATE, mSelectedWidth, mSelectedHeight));
-                    osw.flush();
-                    mSocketOutputStream.flush();
-                    if (mSelectedFormat.equals(MediaFormat.MIMETYPE_VIDEO_AVC)) {
-                        if (mSelectedWidth == 1280 && mSelectedHeight == 720) {
-                            mSocketOutputStream.write(H264_PREDEFINED_HEADER_1280x720);
-                        } else if (mSelectedWidth == 800 && mSelectedHeight == 480) {
-                            mSocketOutputStream.write(H264_PREDEFINED_HEADER_800x480);
-                        } else {
-                            Log.e(TAG, "Unknown width: " + mSelectedWidth + ", height: " + mSelectedHeight);
-                            mSocketOutputStream.close();
-                            mClientSocket.close();
-                            mClientSocket = null;
-                            mSocketOutputStream = null;
-                        }
-                    } else if (mSelectedFormat.equals(MediaFormat.MIMETYPE_VIDEO_VP8)) {
-                        mIvfWriter = new IvfWriter(mSocketOutputStream, mSelectedWidth, mSelectedHeight);
-                        mIvfWriter.writeHeader();
-                    } else {
-                        Log.e(TAG, "Unknown format: " + mSelectedFormat);
-                        mSocketOutputStream.close();
-                        mClientSocket.close();
-                        mClientSocket = null;
-                        mSocketOutputStream = null;
-                    }
-                    if (mSocketOutputStream != null) {
-                        mHandler.post(mStartEncodingRunnable);
-                    }
-                    return;
-                } catch (UnknownHostException e) {
-                    e.printStackTrace();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-                mClientSocket = null;
-                mSocketOutputStream = null;
-            }
-        }
-    }
-
     private boolean createSocket() {
         Thread th = new Thread(new Runnable() {
             @Override
@@ -578,48 +371,43 @@ public class CastService extends Service {
                 try {
                     InetAddress serverAddr = InetAddress.getByName(mReceiverIp);
                     mSocket = new Socket(serverAddr, Common.VIEWER_PORT);
-                    mSocketOutputStream = mSocket.getOutputStream();
-                    OutputStreamWriter osw = new OutputStreamWriter(mSocketOutputStream);
-                    osw.write(String.format(HTTP_MESSAGE_TEMPLATE, mSelectedWidth, mSelectedHeight));
+                    OutputStream outputStream = mSocket.getOutputStream();
+                    OutputStreamWriter osw = new OutputStreamWriter(outputStream);
+                    osw.write(String.format(Locale.getDefault(),
+                            HTTP_MESSAGE_TEMPLATE, mSelectedWidth, mSelectedHeight));
                     osw.flush();
-                    mSocketOutputStream.flush();
+                    outputStream.flush();
 
-                    if (mSelectedFormat.equals(MediaFormat.MIMETYPE_VIDEO_AVC)) {
-                        //if (mSelectedWidth == 1280 && mSelectedHeight == 720) {
-                        //mSocketOutputStream.write(H264_PREDEFINED_HEADER_1280x720);
-                        /*} else if (mSelectedWidth == 800 && mSelectedHeight == 480) {
-                            mSocketOutputStream.write(H264_PREDEFINED_HEADER_800x480);
-                        } else {
-                            Log.e(TAG, "Unknown width: " + mSelectedWidth + ", height: " + mSelectedHeight);
-                            mSocketOutputStream.close();
+                    switch (mSelectedFormat) {
+                        case MediaFormat.MIMETYPE_VIDEO_AVC:
+                            mWriterWrapper = new SocketOutputWrapper(outputStream);
+                            break;
+                        case MediaFormat.MIMETYPE_VIDEO_VP8:
+                            mWriterWrapper = new IvfWriterWrapper(outputStream);
+                            break;
+                        default:
+                            Log.e(TAG, "Unknown format: " + mSelectedFormat);
+                            outputStream.close();
                             mSocket.close();
                             mSocket = null;
-                            mSocketOutputStream = null;
-                        }*/
-                    } else if (mSelectedFormat.equals(MediaFormat.MIMETYPE_VIDEO_VP8)) {
-                        mIvfWriter = new IvfWriter(mSocketOutputStream, mSelectedWidth, mSelectedHeight);
-                        mIvfWriter.writeHeader();
-                    } else {
-                        Log.e(TAG, "Unknown format: " + mSelectedFormat);
-                        mSocketOutputStream.close();
-                        mSocket.close();
-                        mSocket = null;
-                        mSocketOutputStream = null;
+                    }
+
+                    if (mWriterWrapper != null) {
+                        mCastManager = new DefaultCast(CastService.this, mWriterWrapper);
+                        mWriterWrapper.initialize(mSelectedWidth, mSelectedHeight);
                     }
                     return;
-                } catch (UnknownHostException e) {
-                    e.printStackTrace();
+
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
                 mSocket = null;
-                mSocketOutputStream = null;
             }
         });
         th.start();
         try {
             th.join();
-            if (mSocket != null && mSocketOutputStream != null) {
+            if (mSocket != null) {
                 return true;
             }
         } catch (InterruptedException e) {
@@ -651,6 +439,6 @@ public class CastService extends Service {
             mServerSocket = null;
         }
         mSocket = null;
-        mSocketOutputStream = null;
+        mWriterWrapper = null;
     }
 }

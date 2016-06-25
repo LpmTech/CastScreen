@@ -14,16 +14,14 @@
  * limitations under the License.
  */
 
-package com.yschi.castscreen;
+package com.yschi.castscreen.ui.main;
 
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
-import android.media.MediaFormat;
 import android.media.projection.MediaProjectionManager;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -36,22 +34,23 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
-import android.widget.Button;
-import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.json.JSONException;
-import org.json.JSONObject;
+import com.yschi.castscreen.Common;
+import com.yschi.castscreen.R;
+import com.yschi.castscreen.service.cast.CastService_;
+import com.yschi.castscreen.service.discovery.DiscoveryBinder;
+import com.yschi.castscreen.service.discovery.DiscoveryService;
+import com.yschi.castscreen.service.discovery.DiscoveryService_;
+import com.yschi.castscreen.service.discovery.events.EventDiscoveryClient;
 
-import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.SocketException;
-import java.net.SocketTimeoutException;
-import java.util.Arrays;
+import org.greenrobot.eventbus.EventBus;
+import org.greenrobot.eventbus.Subscribe;
+import org.greenrobot.eventbus.ThreadMode;
+
 import java.util.HashMap;
 
 
@@ -64,16 +63,6 @@ public class MainActivity extends Activity {
     private static final String PREF_KEY_RECEIVER = "receiver";
     private static final String PREF_KEY_RESOLUTION = "resolution";
     private static final String PREF_KEY_BITRATE = "bitrate";
-
-    private static final String[] FORMAT_OPTIONS = {
-            MediaFormat.MIMETYPE_VIDEO_AVC,
-            MediaFormat.MIMETYPE_VIDEO_VP8
-    };
-
-    private static final int[][] RESOLUTION_OPTIONS = {
-            {1280, 720, 320},
-            {800, 480, 160}
-    };
 
     private static final int[] BITRATE_OPTIONS = {
             12288000, // 12 Mbps
@@ -93,18 +82,17 @@ public class MainActivity extends Activity {
     private Messenger mMessenger = new Messenger(mHandler);
     private Messenger mServiceMessenger = null;
     private TextView mReceiverTextView;
+
     private ListView mDiscoverListView;
     private ArrayAdapter<String> mDiscoverAdapter;
     private HashMap<String, String> mDiscoverdMap;
-    private String mSelectedFormat = FORMAT_OPTIONS[0];
-    private int mSelectedWidth = RESOLUTION_OPTIONS[0][0];
-    private int mSelectedHeight = RESOLUTION_OPTIONS[0][1];
-    private int mSelectedDpi = RESOLUTION_OPTIONS[0][2];
+
     private int mSelectedBitrate = BITRATE_OPTIONS[0];
     private String mReceiverIp = "";
-    private DiscoveryTask mDiscoveryTask;
     private int mResultCode;
     private Intent mResultData;
+
+    private DiscoveryService mDiscoveryService;
 
     private class HandlerCallback implements Handler.Callback {
         public boolean handleMessage(Message msg) {
@@ -113,19 +101,29 @@ public class MainActivity extends Activity {
         }
     }
 
-    private ServiceConnection mServiceConnection = new ServiceConnection() {
+    private MainActivityServiceConnection mServiceConnection = new MainActivityServiceConnection();
+    private MainActivityServiceConnection mDiscoveryServiceConnection = new MainActivityServiceConnection();
+
+    class MainActivityServiceConnection implements ServiceConnection {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
-            Log.d(TAG, "Service connected, name: " + name);
-            mServiceMessenger = new Messenger(service);
-            try {
-                Message msg = Message.obtain(null, Common.MSG_REGISTER_CLIENT);
-                msg.replyTo = mMessenger;
-                mServiceMessenger.send(msg);
-                Log.d(TAG, "Connected to service, send register client back");
-            } catch (RemoteException e) {
-                Log.d(TAG, "Failed to send message back to service, e: " + e.toString());
-                e.printStackTrace();
+
+            if (service instanceof DiscoveryBinder) {
+                mDiscoveryService = ((DiscoveryBinder) service).getService();
+
+                checkDiscoveryServiceIsScanning();
+            } else {
+                Log.d(TAG, "Service connected, name: " + name);
+                mServiceMessenger = new Messenger(service);
+                try {
+                    Message msg = Message.obtain(null, Common.MSG_REGISTER_CLIENT);
+                    msg.replyTo = mMessenger;
+                    mServiceMessenger.send(msg);
+                    Log.d(TAG, "Connected to service, send register client back");
+                } catch (RemoteException e) {
+                    Log.d(TAG, "Failed to send message back to service, e: " + e.toString());
+                    e.printStackTrace();
+                }
             }
         }
 
@@ -134,7 +132,9 @@ public class MainActivity extends Activity {
             Log.d(TAG, "Service disconnected, name: " + name);
             mServiceMessenger = null;
         }
-    };
+    }
+
+    ;
 
 
     @Override
@@ -168,70 +168,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        // add server mode option
-        mDiscoverAdapter.add(mContext.getString(R.string.server_mode));
-        mDiscoverdMap.put(mContext.getString(R.string.server_mode), "");
-
         mReceiverTextView = (TextView) findViewById(R.id.receiver_textview);
-        final EditText ipEditText = (EditText) findViewById(R.id.ip_edittext);
-        final Button selectButton = (Button) findViewById(R.id.select_button);
-        selectButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                if (ipEditText.getText().length() > 0) {
-                    mReceiverIp = ipEditText.getText().toString();
-                    Log.d(TAG, "Using ip: " + mReceiverIp);
-                    updateReceiverStatus();
-                    mContext.getSharedPreferences(PREF_COMMON, 0).edit().putString(PREF_KEY_INPUT_RECEIVER, mReceiverIp).commit();
-                    mContext.getSharedPreferences(PREF_COMMON, 0).edit().putString(PREF_KEY_RECEIVER, mReceiverIp).commit();
-                }
-            }
-        });
-        ipEditText.setText(mContext.getSharedPreferences(PREF_COMMON, 0).getString(PREF_KEY_INPUT_RECEIVER, ""));
-
-        Spinner formatSpinner = (Spinner) findViewById(R.id.format_spinner);
-        ArrayAdapter<CharSequence> formatAdapter = ArrayAdapter.createFromResource(this,
-                R.array.format_options, android.R.layout.simple_spinner_item);
-        formatAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        formatSpinner.setAdapter(formatAdapter);
-        formatSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
-                mSelectedFormat = FORMAT_OPTIONS[i];
-                mContext.getSharedPreferences(PREF_COMMON, 0).edit().putInt(PREF_KEY_FORMAT, i).commit();
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> adapterView) {
-                mSelectedFormat = FORMAT_OPTIONS[0];
-                mContext.getSharedPreferences(PREF_COMMON, 0).edit().putInt(PREF_KEY_FORMAT, 0).commit();
-            }
-        });
-        formatSpinner.setSelection(mContext.getSharedPreferences(PREF_COMMON, 0).getInt(PREF_KEY_FORMAT, 0));
-
-        Spinner resolutionSpinner = (Spinner) findViewById(R.id.resolution_spinner);
-        ArrayAdapter<CharSequence> resolutionAdapter = ArrayAdapter.createFromResource(this,
-                R.array.resolution_options, android.R.layout.simple_spinner_item);
-        resolutionAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        resolutionSpinner.setAdapter(resolutionAdapter);
-        resolutionSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
-                mSelectedWidth = RESOLUTION_OPTIONS[i][0];
-                mSelectedHeight = RESOLUTION_OPTIONS[i][1];
-                mSelectedDpi = RESOLUTION_OPTIONS[i][2];
-                mContext.getSharedPreferences(PREF_COMMON, 0).edit().putInt(PREF_KEY_RESOLUTION, i).commit();
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> adapterView) {
-                mSelectedWidth = RESOLUTION_OPTIONS[0][0];
-                mSelectedHeight = RESOLUTION_OPTIONS[0][1];
-                mSelectedDpi = RESOLUTION_OPTIONS[0][2];
-                mContext.getSharedPreferences(PREF_COMMON, 0).edit().putInt(PREF_KEY_RESOLUTION, 0).commit();
-            }
-        });
-        resolutionSpinner.setSelection(mContext.getSharedPreferences(PREF_COMMON, 0).getInt(PREF_KEY_RESOLUTION, 0));
 
         Spinner bitrateSpinner = (Spinner) findViewById(R.id.bitrate_spinner);
         ArrayAdapter<CharSequence> bitrateAdapter = ArrayAdapter.createFromResource(this,
@@ -263,15 +200,22 @@ public class MainActivity extends Activity {
         super.onResume();
 
         // start discovery task
-        mDiscoveryTask = new DiscoveryTask();
-        mDiscoveryTask.execute();
+        EventBus eventBus = EventBus.getDefault();
+        if (!eventBus.isRegistered(this)) {
+            eventBus.register(this);
+        }
+        checkDiscoveryServiceIsScanning();
     }
 
     @Override
     public void onPause() {
+        EventBus.getDefault().unregister(this);
+
+        stopDiscovery();
+
         super.onPause();
-        mDiscoveryTask.cancel(true);
     }
+
     @Override
     protected void onDestroy() {
         super.onDestroy();
@@ -280,15 +224,7 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        // Inflate the menu; this adds items to the action bar if it is present.
         getMenuInflater().inflate(R.menu.menu_main, menu);
-        //if (mInputSurface != null) {
-        //    menu.findItem(R.id.action_start).setVisible(false);
-        //    menu.findItem(R.id.action_stop).setVisible(true);
-        //} else {
-        //    menu.findItem(R.id.action_start).setVisible(true);
-        //    menu.findItem(R.id.action_stop).setVisible(false);
-        //}
         return true;
     }
 
@@ -304,15 +240,11 @@ public class MainActivity extends Activity {
             Log.d(TAG, "==== start ====");
             if (mReceiverIp != null) {
                 startCaptureScreen();
-                //invalidateOptionsMenu();
-            } else {
-                Toast.makeText(mContext, R.string.no_receiver, Toast.LENGTH_SHORT).show();
             }
             return true;
         } else if (id == R.id.action_stop) {
             Log.d(TAG, "==== stop ====");
             stopScreenCapture();
-            //invalidateOptionsMenu();
             return true;
         }
 
@@ -343,6 +275,20 @@ public class MainActivity extends Activity {
         }
     }
 
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onEvent(EventDiscoveryClient event) {
+        if (event != null) {
+            mDiscoverdMap.put(event.getName(), event.getIp());
+            mHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    mDiscoverAdapter.clear();
+                    mDiscoverAdapter.addAll(mDiscoverdMap.keySet());
+                }
+            });
+        }
+    }
+
     private void updateReceiverStatus() {
         if (mReceiverIp.length() > 0) {
             mReceiverTextView.setText(String.format(mContext.getString(R.string.receiver), mReceiverIp));
@@ -369,14 +315,6 @@ public class MainActivity extends Activity {
         }
         final Intent stopCastIntent = new Intent(Common.ACTION_STOP_CAST);
         sendBroadcast(stopCastIntent);
-        /*
-        try {
-            Message msg = Message.obtain(null, Common.MSG_STOP_CAST);
-            mServiceMessenger.send(msg);
-        } catch (RemoteException e) {
-            Log.e(TAG, "Failed to send stop message to service");
-            e.printStackTrace();
-        }*/
     }
 
     private void startService() {
@@ -385,10 +323,6 @@ public class MainActivity extends Activity {
             intent.putExtra(Common.EXTRA_RESULT_CODE, mResultCode);
             intent.putExtra(Common.EXTRA_RESULT_DATA, mResultData);
             intent.putExtra(Common.EXTRA_RECEIVER_IP, mReceiverIp);
-            intent.putExtra(Common.EXTRA_VIDEO_FORMAT, mSelectedFormat);
-            intent.putExtra(Common.EXTRA_SCREEN_WIDTH, mSelectedWidth);
-            intent.putExtra(Common.EXTRA_SCREEN_HEIGHT, mSelectedHeight);
-            intent.putExtra(Common.EXTRA_SCREEN_DPI, mSelectedDpi);
             intent.putExtra(Common.EXTRA_VIDEO_BITRATE, mSelectedBitrate);
             Log.d(TAG, "===== start service =====");
             startService(intent);
@@ -414,61 +348,24 @@ public class MainActivity extends Activity {
         }
     }
 
-    private class DiscoveryTask extends AsyncTask<Void, Void, Void> {
-        @Override
-        protected Void doInBackground(Void... voids) {
-            try {
-                DatagramSocket discoverUdpSocket = new DatagramSocket();
-                Log.d(TAG, "Bind local port: " + discoverUdpSocket.getLocalPort());
-                discoverUdpSocket.setSoTimeout(3000);
-                byte[] buf = new byte[1024];
-                while (true) {
-                    if (!Utils.sendBroadcastMessage(mContext, discoverUdpSocket, Common.DISCOVER_PORT, Common.DISCOVER_MESSAGE)) {
-                        Log.w(TAG, "Failed to send discovery message");
-                    }
-                    Arrays.fill(buf, (byte)0);
-                    DatagramPacket receivePacket = new DatagramPacket(buf, buf.length);
-                    try {
-                        discoverUdpSocket.receive(receivePacket);
-                        String ip = receivePacket.getAddress().getHostAddress();
-                        Log.d(TAG, "Receive discover response from " + ip + ", length: " + receivePacket.getLength());
-                        if (receivePacket.getLength() > 9) {
-                            String respMsg = new String(receivePacket.getData());
-                            Log.d(TAG, "Discover response message: " + respMsg);
-                            try {
-                                JSONObject json = new JSONObject(respMsg);
-                                String name = json.getString("name");
-                                //String id = json.getString("id");
-                                String width = json.getString("width");
-                                String height = json.getString("height");
-                                mDiscoverdMap.put(name, ip);
-                                mHandler.post(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        mDiscoverAdapter.clear();
-                                        mDiscoverAdapter.addAll(mDiscoverdMap.keySet());
-                                    }
-                                });
-                                Log.d(TAG, "Got receiver name: " + name + ", ip: " + ip + ", width: " + width + ", height: " + height);
-                            } catch (JSONException e) {
-                                e.printStackTrace();
-                            }
-                        }
-                    } catch (SocketTimeoutException e) {
-                    }
+    private void checkDiscoveryServiceIsScanning() {
+        if (mDiscoveryService != null) {
+            mDiscoveryService.startDiscovery();
+        } else {
+            Intent discovery_intent = new Intent(this, DiscoveryService_.class);
+            startService(discovery_intent);
+            bindService(discovery_intent, mDiscoveryServiceConnection, Context.BIND_AUTO_CREATE);
+        }
+    }
 
-
-                    Thread.sleep(3000);
-                }
-            } catch (SocketException e) {
-                Log.d(TAG, "Failed to create socket for discovery");
-                e.printStackTrace();
-            } catch (IOException e) {
-                e.printStackTrace();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+    private void stopDiscovery() {
+        try {
+            if (mDiscoveryService != null) {
+                mDiscoveryService.stopDiscovery();
             }
-            return null;
+            unbindService(mDiscoveryServiceConnection);
+        } catch (Exception e) {
+
         }
     }
 }

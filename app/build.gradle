@@ -41,7 +41,12 @@ apt {
 
 dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
+    compile 'com.android.support:support-annotations:23.3.0'
 
     apt "org.androidannotations:androidannotations:3.3.2"
     compile "org.androidannotations:androidannotations-api:3.3.2"
+
+    compile 'com.jakewharton:butterknife:7.0.1'
+
+    compile 'org.greenrobot:eventbus:3.0.0'
 }

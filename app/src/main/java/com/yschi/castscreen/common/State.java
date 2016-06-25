@@ -1,4 +1,4 @@
-package com.yschi.castscreen;
+package com.yschi.castscreen.common;
 
 /**
  * Created by kevinleperf on 22/06/2016.
