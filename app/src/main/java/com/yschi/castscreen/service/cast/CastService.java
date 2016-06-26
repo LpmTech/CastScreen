@@ -33,7 +33,6 @@ import android.media.projection.MediaProjectionManager;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
-import android.os.Messenger;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Surface;
@@ -42,7 +41,6 @@ import android.view.WindowManager;
 import com.yschi.castscreen.Common;
 import com.yschi.castscreen.IvfWriter;
 import com.yschi.castscreen.R;
-import com.yschi.castscreen.common.State;
 import com.yschi.castscreen.service.cast.managers.DefaultCast;
 import com.yschi.castscreen.service.cast.writers.IWriterWrapper;
 import com.yschi.castscreen.service.cast.writers.IvfWriterWrapper;
@@ -57,16 +55,12 @@ import java.io.OutputStreamWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.ArrayList;
 import java.util.Locale;
 
 @EService
 public class CastService extends Service {
     private final String TAG = "CastService";
     private final int NT_ID_CASTING = 0;
-    private Handler mHandler = new Handler(new ServiceHandlerCallback());
-    private Messenger mMessenger = new Messenger(mHandler);
-    private ArrayList<Messenger> mClients = new ArrayList<Messenger>();
     private IntentFilter mBroadcastIntentFilter;
 
     private static final String HTTP_MESSAGE_TEMPLATE = "POST /api/v1/h264 HTTP/1.1\r\n" +
@@ -74,24 +68,6 @@ public class CastService extends Service {
             "X-WIDTH: %1$d\r\n" +
             "X-HEIGHT: %2$d\r\n" +
             "\r\n";
-
-    // 1280x720@25
-    private static final byte[] H264_PREDEFINED_HEADER_1280x720 = {
-            (byte) 0x21, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00,
-            (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x01,
-            (byte) 0x67, (byte) 0x42, (byte) 0x80, (byte) 0x20, (byte) 0xda, (byte) 0x01, (byte) 0x40, (byte) 0x16,
-            (byte) 0xe8, (byte) 0x06, (byte) 0xd0, (byte) 0xa1, (byte) 0x35, (byte) 0x00, (byte) 0x00, (byte) 0x00,
-            (byte) 0x01, (byte) 0x68, (byte) 0xce, (byte) 0x06, (byte) 0xe2, (byte) 0x32, (byte) 0x24, (byte) 0x00,
-            (byte) 0x00, (byte) 0x7a, (byte) 0x83, (byte) 0x3d, (byte) 0xae, (byte) 0x37, (byte) 0x00, (byte) 0x00};
-
-    // 800x480@25
-    private static final byte[] H264_PREDEFINED_HEADER_800x480 = {
-            (byte) 0x21, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00,
-            (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x01,
-            (byte) 0x67, (byte) 0x42, (byte) 0x80, (byte) 0x20, (byte) 0xda, (byte) 0x03, (byte) 0x20, (byte) 0xf6,
-            (byte) 0x80, (byte) 0x6d, (byte) 0x0a, (byte) 0x13, (byte) 0x50, (byte) 0x00, (byte) 0x00, (byte) 0x00,
-            (byte) 0x01, (byte) 0x68, (byte) 0xce, (byte) 0x06, (byte) 0xe2, (byte) 0x32, (byte) 0x24, (byte) 0x00,
-            (byte) 0x00, (byte) 0x7a, (byte) 0x83, (byte) 0x3d, (byte) 0xae, (byte) 0x37, (byte) 0x00, (byte) 0x00};
 
     private MediaProjectionManager mMediaProjectionManager;
     private String mReceiverIp;
@@ -102,56 +78,19 @@ public class CastService extends Service {
     private int mSelectedHeight;
     private int mSelectedDpi;
     private int mSelectedBitrate;
-    //private boolean mMuxerStarted = false;
     private MediaProjection mMediaProjection;
     private VirtualDisplay mVirtualDisplay;
     private Surface mInputSurface;
-    //private MediaMuxer mMuxer;
     private MediaCodec mVideoEncoder;
-    private MediaCodec.BufferInfo mVideoBufferInfo;
-    //private int mTrackIndex = -1;
     private ServerSocket mServerSocket;
     private Socket mSocket;
     private IvfWriter mIvfWriter;
 
-    private State mState = State.STOP;
-    //private Handler mDrainHandler = new Handler();
-    private Runnable mStartEncodingRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (!startScreenCapture()) {
-                Log.e(TAG, "Failed to start capturing screen");
-            }
-        }
-    };
     private int _screen_width;
     private int _screen_height;
     private int _screen_dpi;
     private DefaultCast mCastManager;
     private IWriterWrapper mWriterWrapper;
-
-    private class ServiceHandlerCallback implements Handler.Callback {
-        @Override
-        public boolean handleMessage(Message msg) {
-            Log.d(TAG, "Handler got event, what: " + msg.what);
-            switch (msg.what) {
-                case Common.MSG_REGISTER_CLIENT: {
-                    mClients.add(msg.replyTo);
-                    break;
-                }
-                case Common.MSG_UNREGISTER_CLIENT: {
-                    mClients.remove(msg.replyTo);
-                    break;
-                }
-                case Common.MSG_STOP_CAST: {
-                    stopScreenCapture();
-                    closeSocket(true);
-                    stopSelf();
-                }
-            }
-            return false;
-        }
-    }
 
     private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
         @Override
@@ -198,18 +137,26 @@ public class CastService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null) {
-            return START_NOT_STICKY;
-        }
-        mReceiverIp = intent.getStringExtra(Common.EXTRA_RECEIVER_IP);
-        mResultCode = intent.getIntExtra(Common.EXTRA_RESULT_CODE, -1);
-        mResultData = intent.getParcelableExtra(Common.EXTRA_RESULT_DATA);
+        return START_STICKY;
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return new CastBinder(this);
+    }
+
+    public void startRecording(String receiverIp, int resultCode,
+                               Intent resultData,
+                               int selectedBitrate) {
+        mReceiverIp = receiverIp;
+        mResultCode = resultCode;
+        mResultData = resultData;
         Log.d(TAG, "Remove IP: " + mReceiverIp);
         if (mReceiverIp == null) {
-            return START_NOT_STICKY;
+            return;
         }
 
-        mSelectedBitrate = intent.getIntExtra(Common.EXTRA_VIDEO_BITRATE, Common.DEFAULT_VIDEO_BITRATE);
+        mSelectedBitrate = selectedBitrate;
         mSelectedFormat = MediaFormat.MIMETYPE_VIDEO_AVC;
 
         mSelectedWidth = _screen_width;
@@ -219,19 +166,19 @@ public class CastService extends Service {
         Log.d(TAG, "Start with client mode");
         if (!createSocket()) {
             Log.e(TAG, "Failed to create socket to receiver, ip: " + mReceiverIp);
-            return START_NOT_STICKY;
+            return;
         }
+
         if (!startScreenCapture()) {
             Log.e(TAG, "Failed to start capture screen");
-            return START_NOT_STICKY;
         }
-
-        return START_STICKY;
     }
 
-    @Override
-    public IBinder onBind(Intent intent) {
-        return mMessenger.getBinder();
+    public void stopRecording() {
+        Log.d(TAG, "stopRecording");
+        stopScreenCapture();
+        closeSocket(true);
+        stopSelf();
     }
 
     private void showNotification() {
@@ -325,7 +272,6 @@ public class CastService extends Service {
     }
 
     private void releaseEncoders() {
-        mState = State.STOP;
         try {
             if (mVideoEncoder != null) {
                 mVideoEncoder.stop();
@@ -358,10 +304,6 @@ public class CastService extends Service {
         } catch (Exception e) {
 
         }
-        //mResultCode = 0;
-        //mResultData = null;
-        mVideoBufferInfo = null;
-        //mTrackIndex = -1;
     }
 
     private boolean createSocket() {

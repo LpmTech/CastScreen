@@ -23,11 +23,8 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.IBinder;
-import android.os.Message;
-import android.os.Messenger;
-import android.os.RemoteException;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -39,8 +36,9 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.yschi.castscreen.Common;
 import com.yschi.castscreen.R;
+import com.yschi.castscreen.service.cast.CastBinder;
+import com.yschi.castscreen.service.cast.CastService;
 import com.yschi.castscreen.service.cast.CastService_;
 import com.yschi.castscreen.service.discovery.DiscoveryBinder;
 import com.yschi.castscreen.service.discovery.DiscoveryService;
@@ -58,10 +56,7 @@ public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
 
     private static final String PREF_COMMON = "common";
-    private static final String PREF_KEY_INPUT_RECEIVER = "input_receiver";
-    private static final String PREF_KEY_FORMAT = "format";
     private static final String PREF_KEY_RECEIVER = "receiver";
-    private static final String PREF_KEY_RESOLUTION = "resolution";
     private static final String PREF_KEY_BITRATE = "bitrate";
 
     private static final int[] BITRATE_OPTIONS = {
@@ -78,9 +73,6 @@ public class MainActivity extends Activity {
 
     private Context mContext;
     private MediaProjectionManager mMediaProjectionManager;
-    private Handler mHandler = new Handler(new HandlerCallback());
-    private Messenger mMessenger = new Messenger(mHandler);
-    private Messenger mServiceMessenger = null;
     private TextView mReceiverTextView;
 
     private ListView mDiscoverListView;
@@ -92,14 +84,8 @@ public class MainActivity extends Activity {
     private int mResultCode;
     private Intent mResultData;
 
+    private CastService mCastService;
     private DiscoveryService mDiscoveryService;
-
-    private class HandlerCallback implements Handler.Callback {
-        public boolean handleMessage(Message msg) {
-            Log.d(TAG, "Handler got event, what: " + msg.what);
-            return false;
-        }
-    }
 
     private MainActivityServiceConnection mServiceConnection = new MainActivityServiceConnection();
     private MainActivityServiceConnection mDiscoveryServiceConnection = new MainActivityServiceConnection();
@@ -108,29 +94,23 @@ public class MainActivity extends Activity {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
 
+            Log.d(TAG, "onServiceConnected " + service.getClass().getSimpleName());
             if (service instanceof DiscoveryBinder) {
                 mDiscoveryService = ((DiscoveryBinder) service).getService();
 
                 checkDiscoveryServiceIsScanning();
-            } else {
-                Log.d(TAG, "Service connected, name: " + name);
-                mServiceMessenger = new Messenger(service);
-                try {
-                    Message msg = Message.obtain(null, Common.MSG_REGISTER_CLIENT);
-                    msg.replyTo = mMessenger;
-                    mServiceMessenger.send(msg);
-                    Log.d(TAG, "Connected to service, send register client back");
-                } catch (RemoteException e) {
-                    Log.d(TAG, "Failed to send message back to service, e: " + e.toString());
-                    e.printStackTrace();
-                }
+            } else if (service instanceof CastBinder) {
+                mCastService = ((CastBinder) service).getService();
+
+                checkRecordingService();
             }
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
             Log.d(TAG, "Service disconnected, name: " + name);
-            mServiceMessenger = null;
+            mCastService = null;
+            mDiscoveryService = null;
         }
     }
 
@@ -192,7 +172,8 @@ public class MainActivity extends Activity {
 
         mReceiverIp = mContext.getSharedPreferences(PREF_COMMON, 0).getString(PREF_KEY_RECEIVER, "");
         updateReceiverStatus();
-        startService();
+
+        checkRecordingService();
     }
 
     @Override
@@ -205,6 +186,8 @@ public class MainActivity extends Activity {
             eventBus.register(this);
         }
         checkDiscoveryServiceIsScanning();
+        checkRecordingService();
+        startCaptureScreen(false);
     }
 
     @Override
@@ -218,8 +201,9 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
         doUnbindService();
+
+        super.onDestroy();
     }
 
     @Override
@@ -230,22 +214,18 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        // Handle action bar item clicks here. The action bar will
-        // automatically handle clicks on the Home/Up button, so long
-        // as you specify a parent activity in AndroidManifest.xml.
-        int id = item.getItemId();
-
-        //noinspection SimplifiableIfStatement
-        if (id == R.id.action_start) {
-            Log.d(TAG, "==== start ====");
-            if (mReceiverIp != null) {
-                startCaptureScreen();
+        switch (item.getItemId()) {
+            case R.id.action_start:
+                Log.d(TAG, "==== start ==== " + mReceiverIp);
+                //if (!TextUtils.isEmpty(mReceiverIp))
+            {
+                startCaptureScreen(true);
             }
             return true;
-        } else if (id == R.id.action_stop) {
-            Log.d(TAG, "==== stop ====");
-            stopScreenCapture();
-            return true;
+            case R.id.action_stop:
+                Log.d(TAG, "==== stop ====");
+                stopScreenCapture();
+                return true;
         }
 
         return super.onOptionsItemSelected(item);
@@ -279,13 +259,8 @@ public class MainActivity extends Activity {
     public void onEvent(EventDiscoveryClient event) {
         if (event != null) {
             mDiscoverdMap.put(event.getName(), event.getIp());
-            mHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    mDiscoverAdapter.clear();
-                    mDiscoverAdapter.addAll(mDiscoverdMap.keySet());
-                }
-            });
+            mDiscoverAdapter.clear();
+            mDiscoverAdapter.addAll(mDiscoverdMap.keySet());
         }
     }
 
@@ -298,11 +273,20 @@ public class MainActivity extends Activity {
     }
 
     private void startCaptureScreen() {
-        if (mResultCode != 0 && mResultData != null) {
-            startService();
-        } else {
-            Log.d(TAG, "Requesting confirmation");
-            // This initiates a prompt dialog for the user to confirm screen projection.
+        startCaptureScreen(false);
+    }
+
+    private void startCaptureScreen(boolean prompt) {
+        if (mResultCode != 0 && mResultData != null
+                && !TextUtils.isEmpty(mReceiverIp)) {
+            checkRecordingService();
+            if (mCastService != null) {
+                mCastService.startRecording(mReceiverIp, mResultCode,
+                        mResultData, mSelectedBitrate);
+                mResultData = null;
+                mResultCode = 0;
+            }
+        } else if (prompt) {
             startActivityForResult(
                     mMediaProjectionManager.createScreenCaptureIntent(),
                     REQUEST_MEDIA_PROJECTION);
@@ -310,41 +294,24 @@ public class MainActivity extends Activity {
     }
 
     private void stopScreenCapture() {
-        if (mServiceMessenger == null) {
-            return;
-        }
-        final Intent stopCastIntent = new Intent(Common.ACTION_STOP_CAST);
-        sendBroadcast(stopCastIntent);
-    }
-
-    private void startService() {
-        if (mResultCode != 0 && mResultData != null && mReceiverIp != null) {
-            Intent intent = new Intent(this, CastService_.class);
-            intent.putExtra(Common.EXTRA_RESULT_CODE, mResultCode);
-            intent.putExtra(Common.EXTRA_RESULT_DATA, mResultData);
-            intent.putExtra(Common.EXTRA_RECEIVER_IP, mReceiverIp);
-            intent.putExtra(Common.EXTRA_VIDEO_BITRATE, mSelectedBitrate);
-            Log.d(TAG, "===== start service =====");
-            startService(intent);
-            bindService(intent, mServiceConnection, Context.BIND_AUTO_CREATE);
-        } else {
-            Intent intent = new Intent(this, CastService_.class);
-            startService(intent);
-            bindService(intent, mServiceConnection, Context.BIND_AUTO_CREATE);
-        }
+        //if (mCastService != null) {
+        mCastService.stopRecording();
+        //}
     }
 
     private void doUnbindService() {
-        if (mServiceMessenger != null) {
-            try {
-                Message msg = Message.obtain(null, Common.MSG_UNREGISTER_CLIENT);
-                msg.replyTo = mMessenger;
-                mServiceMessenger.send(msg);
-            } catch (RemoteException e) {
-                Log.d(TAG, "Failed to send unregister message to service, e: " + e.toString());
-                e.printStackTrace();
-            }
+        if (mCastService != null) {
+            mCastService = null;
             unbindService(mServiceConnection);
+        }
+    }
+
+    private void checkRecordingService() {
+        if (mCastService == null) {
+            Log.d(TAG, "checkRecordingService");
+            Intent intent = new Intent(this, CastService_.class);
+            startService(intent);
+            bindService(intent, mServiceConnection, Context.BIND_AUTO_CREATE);
         }
     }
 

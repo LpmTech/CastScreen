@@ -31,8 +31,6 @@ public class Common {
     public static final int DEFAULT_VIDEO_FPS = 25;
 
     // Activity to service
-    public static final int MSG_REGISTER_CLIENT = 200;
-    public static final int MSG_UNREGISTER_CLIENT = 201;
     public static final int MSG_STOP_CAST = 301;
 
     public static final String EXTRA_RESULT_CODE = "result_code";

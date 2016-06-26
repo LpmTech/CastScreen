@@ -113,7 +113,7 @@ public class DefaultCast implements ICastManager {
                 e.printStackTrace();
             }
         }
-
+        mState = State.STOP;
     }
 
     @Override
