@@ -24,23 +24,25 @@ import android.content.ServiceConnection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.os.RemoteException;
 import android.text.TextUtils;
 import android.util.Log;
-import android.view.Menu;
-import android.view.MenuItem;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.Toast;
 
 import com.yschi.castscreen.R;
-import com.yschi.castscreen.service.cast.CastBinder;
-import com.yschi.castscreen.service.cast.CastService;
+import com.yschi.castscreen.network.wifi.IWifiBroadcastListener;
+import com.yschi.castscreen.network.wifi.WifiBroadcastReceiver;
 import com.yschi.castscreen.service.cast.CastService_;
+import com.yschi.castscreen.service.cast.ICastService;
 import com.yschi.castscreen.service.discovery.DiscoveryBinder;
 import com.yschi.castscreen.service.discovery.DiscoveryService;
 import com.yschi.castscreen.service.discovery.DiscoveryService_;
 import com.yschi.castscreen.ui.activity.AbstractBackstackProvider;
 import com.yschi.castscreen.ui.activity.AbstractControllerActivity;
+import com.yschi.castscreen.ui.activity.FragmentDescriptor;
+import com.yschi.castscreen.ui.activity.events.OnEventPushFragment;
 
 import org.greenrobot.eventbus.EventBus;
 
@@ -48,7 +50,7 @@ import java.util.HashMap;
 import java.util.Set;
 
 
-public class MainActivity extends AbstractControllerActivity {
+public class MainActivity extends AbstractControllerActivity implements IWifiBroadcastListener {
     private static final String TAG = "MainActivity";
 
     private static final String PREF_COMMON = "common";
@@ -65,6 +67,7 @@ public class MainActivity extends AbstractControllerActivity {
     private static final int REQUEST_MEDIA_PROJECTION = 100;
     private static final String STATE_RESULT_CODE = "result_code";
     private static final String STATE_RESULT_DATA = "result_data";
+    private static final String STATE_RECEIVER_IP = "receiver_ip";
 
     private Context mContext;
     private MediaProjectionManager mMediaProjectionManager;
@@ -76,11 +79,13 @@ public class MainActivity extends AbstractControllerActivity {
     private int mResultCode;
     private Intent mResultData;
 
-    private CastService mCastService;
+    private ICastService mCastService;
     private DiscoveryService mDiscoveryService;
 
     private MainActivityServiceConnection mServiceConnection = new MainActivityServiceConnection();
     private MainActivityServiceConnection mDiscoveryServiceConnection = new MainActivityServiceConnection();
+    private WifiBroadcastReceiver mWifiBroadcastReceiver = new WifiBroadcastReceiver(this);
+
 
     public Set<String> keySet() {
         return mDiscoverdMap.keySet();
@@ -95,8 +100,8 @@ public class MainActivity extends AbstractControllerActivity {
                 mDiscoveryService = ((DiscoveryBinder) service).getService();
 
                 checkDiscoveryServiceIsScanning();
-            } else if (service instanceof CastBinder) {
-                mCastService = ((CastBinder) service).getService();
+            } else /*if (service instanceof CastBinder)*/ {
+                mCastService = ICastService.Stub.asInterface(service);
 
                 checkRecordingService();
             }
@@ -109,8 +114,6 @@ public class MainActivity extends AbstractControllerActivity {
             mDiscoveryService = null;
         }
     }
-
-    ;
 
 
     @Override
@@ -126,6 +129,7 @@ public class MainActivity extends AbstractControllerActivity {
         if (savedInstanceState != null) {
             mResultCode = savedInstanceState.getInt(STATE_RESULT_CODE);
             mResultData = savedInstanceState.getParcelable(STATE_RESULT_DATA);
+            mReceiverIp = savedInstanceState.getString(STATE_RECEIVER_IP);
         }
 
         mContext = this;
@@ -133,7 +137,7 @@ public class MainActivity extends AbstractControllerActivity {
 
         mDiscoverdMap = new HashMap<>();
 
-        mReceiverIp = mContext.getSharedPreferences(PREF_COMMON, 0).getString(PREF_KEY_RECEIVER, "");
+        //mReceiverIp = mContext.getSharedPreferences(PREF_COMMON, 0).getString(PREF_KEY_RECEIVER, "");
 
         checkRecordingService();
     }
@@ -150,10 +154,19 @@ public class MainActivity extends AbstractControllerActivity {
         checkDiscoveryServiceIsScanning();
         checkRecordingService();
         startCaptureScreen(false);
+
+        mWifiBroadcastReceiver.registerTo(this);
+        if (mWifiBroadcastReceiver.isWifiConnected(this)) {
+            onWifiConnected();
+        } else {
+            onWifiDisconnected();
+        }
     }
 
     @Override
     public void onPause() {
+        mWifiBroadcastReceiver.unregister(this);
+
         EventBus.getDefault().unregister(this);
 
         stopDiscovery();
@@ -166,31 +179,6 @@ public class MainActivity extends AbstractControllerActivity {
         doUnbindService();
 
         super.onDestroy();
-    }
-
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.menu_main, menu);
-        return true;
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        switch (item.getItemId()) {
-            case R.id.action_start:
-                Log.d(TAG, "==== start ==== " + mReceiverIp);
-                //if (!TextUtils.isEmpty(mReceiverIp))
-            {
-                startCaptureScreen(true);
-            }
-            return true;
-            case R.id.action_stop:
-                Log.d(TAG, "==== stop ====");
-                stopScreenCapture();
-                return true;
-        }
-
-        return super.onOptionsItemSelected(item);
     }
 
     @Override
@@ -214,13 +202,13 @@ public class MainActivity extends AbstractControllerActivity {
         if (mResultData != null) {
             outState.putInt(STATE_RESULT_CODE, mResultCode);
             outState.putParcelable(STATE_RESULT_DATA, mResultData);
+            outState.putString(STATE_RECEIVER_IP, mReceiverIp);
         }
     }
 
     /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
      * Controller Overrides
      * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
-
 
     @Override
     public void setCanEdit(boolean state) {
@@ -247,11 +235,30 @@ public class MainActivity extends AbstractControllerActivity {
         return 0;
     }
 
+    /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+     * Manage Wifi states
+     * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+    @Override
+    public void onWifiConnected() {
+        EventBus.getDefault().post(new OnEventPushFragment(FragmentDescriptor.MAIN, new Bundle()));
+    }
+
+    @Override
+    public void onWifiDisconnected() {
+        stopScreenCapture();
+        EventBus.getDefault().post(new OnEventPushFragment(FragmentDescriptor.WIFI, new Bundle()));
+    }
+
     public void setReceiverName(String name) {
         String ip = mDiscoverdMap.get(name);
         Log.d(TAG, "Select receiver name: " + name + ", ip: " + ip);
         mReceiverIp = ip;
         mContext.getSharedPreferences(PREF_COMMON, 0).edit().putString(PREF_KEY_RECEIVER, mReceiverIp).commit();
+    }
+
+    public boolean hasReceiverIpSet() {
+        return !TextUtils.isEmpty(mReceiverIp);
     }
 
     public void put(String name, String ip) {
@@ -262,27 +269,37 @@ public class MainActivity extends AbstractControllerActivity {
         startCaptureScreen(false);
     }
 
-    private void startCaptureScreen(boolean prompt) {
-        if (mResultCode != 0 && mResultData != null
-                && !TextUtils.isEmpty(mReceiverIp)) {
-            checkRecordingService();
-            if (mCastService != null) {
-                mCastService.startRecording(mReceiverIp, mResultCode,
-                        mResultData, mSelectedBitrate);
-                mResultData = null;
-                mResultCode = 0;
+    public void startCaptureScreen(boolean prompt) {
+        if (mWifiBroadcastReceiver.isWifiConnected(this)) {
+            if (mResultCode != 0 && mResultData != null
+                    && !TextUtils.isEmpty(mReceiverIp)) {
+                checkRecordingService();
+                if (mCastService != null) {
+                    try {
+                        mCastService.startRecording(mReceiverIp, mResultCode,
+                                mResultData, mSelectedBitrate);
+                    } catch (RemoteException e) {
+                        e.printStackTrace();
+                    }
+                    mResultData = null;
+                    mResultCode = 0;
+                }
+            } else if (prompt) {
+                startActivityForResult(
+                        mMediaProjectionManager.createScreenCaptureIntent(),
+                        REQUEST_MEDIA_PROJECTION);
             }
-        } else if (prompt) {
-            startActivityForResult(
-                    mMediaProjectionManager.createScreenCaptureIntent(),
-                    REQUEST_MEDIA_PROJECTION);
         }
     }
 
-    private void stopScreenCapture() {
-        //if (mCastService != null) {
-        mCastService.stopRecording();
-        //}
+    public void stopScreenCapture() {
+        if (mCastService != null) {
+            try {
+                mCastService.stopRecording();
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     private void doUnbindService() {

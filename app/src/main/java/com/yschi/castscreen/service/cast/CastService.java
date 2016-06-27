@@ -32,6 +32,8 @@ import android.media.MediaFormat;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.IBinder;
+import android.os.RemoteException;
+import android.support.annotation.Nullable;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Surface;
@@ -91,6 +93,19 @@ public class CastService extends Service {
     private DefaultCast mCastManager;
     private IWriterWrapper mWriterWrapper;
 
+
+    private final ICastService.Stub mBinder = new ICastService.Stub() {
+        @Override
+        public void startRecording(String receiverIp, int resultCode, Intent resultData, int selectedBitrate) throws RemoteException {
+            CastService.this.startRecording(receiverIp, resultCode, resultData, selectedBitrate);
+        }
+
+        @Override
+        public void stopRecording() throws RemoteException {
+            CastService.this.stopRecording();
+        }
+    };
+
     private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -142,9 +157,10 @@ public class CastService extends Service {
         return START_STICKY;
     }
 
+    @Nullable
     @Override
     public IBinder onBind(Intent intent) {
-        return new CastBinder(this);
+        return mBinder;
     }
 
     public void startRecording(String receiverIp, int resultCode,

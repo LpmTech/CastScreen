@@ -160,7 +160,6 @@ public abstract class AbstractControllerActivity extends AppCompatActivity
     public void onEvent(OnEventPushFragment event) {
         sBackstackController.push(event.getType().ordinal(),
                 event.getData());
-        Toast.makeText(this, "ee", Toast.LENGTH_SHORT).show();
     }
 
     @Subscribe(threadMode = ThreadMode.MAIN)

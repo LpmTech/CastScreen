@@ -4,6 +4,9 @@ import android.content.Context;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
@@ -35,6 +38,11 @@ public class MainFragment extends AbstractPopableFragment {
     @Bind(R.id.discover_waiting)
     ViewGroup mDiscoverWaiting;
 
+    public MainFragment() {
+        super();
+
+        setHasOptionsMenu(true);
+    }
 
     @Nullable
     @Override
@@ -48,11 +56,8 @@ public class MainFragment extends AbstractPopableFragment {
 
         ButterKnife.bind(this, view);
 
-        mDiscoverAdapter = new ArrayAdapter<>(getActivity(),
-                android.R.layout.simple_list_item_1);
-
+        mDiscoverAdapter = new ArrayAdapter<>(getActivity(), android.R.layout.simple_list_item_1);
         mDiscoverListView.setAdapter(mDiscoverAdapter);
-
         mDiscoverAdapter.addAll(mMainActivity.keySet());
 
         if (mDiscoverAdapter.getCount() > 0) {
@@ -67,6 +72,7 @@ public class MainFragment extends AbstractPopableFragment {
                 String name = mDiscoverAdapter.getItem(i);
 
                 mMainActivity.setReceiverName(name);
+                mMainActivity.supportInvalidateOptionsMenu();
             }
         });
     }
@@ -84,6 +90,29 @@ public class MainFragment extends AbstractPopableFragment {
     public void onDetach() {
         mMainActivity = null;
         super.onDetach();
+    }
+
+    @Override
+    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+        super.onCreateOptionsMenu(menu, inflater);
+
+        if(mMainActivity.hasReceiverIpSet()) {
+            inflater.inflate(R.menu.menu_main, menu);
+        }
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        switch (item.getItemId()) {
+            case R.id.action_start:
+                mMainActivity.startCaptureScreen(true);
+                return true;
+            case R.id.action_stop:
+                mMainActivity.stopScreenCapture();
+                return true;
+        }
+
+        return super.onOptionsItemSelected(item);
     }
 
     @Override
