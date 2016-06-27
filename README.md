@@ -7,6 +7,15 @@ Demo video: https://youtu.be/D_DSuvFz_sg
 * Gstreamer 1.0 with H264 decoder (h264parse, avdec_h264) 
 * adb for mirror via USB
 
+## Installation
+
+### MacOS
+
+* Install Homebrew
+* Install all the gstreamer dependecies
+    brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-ffmpeg010 gst-libav
+
+
 ## With native receiver
 * Compile the receiver
 ```

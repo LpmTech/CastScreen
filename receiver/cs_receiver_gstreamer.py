@@ -27,7 +27,7 @@ HOST = ''
 PORT = 53515
 IP = '192.168.0.11'
 
-bufferSize = 1
+bufferSize = 1024
 meta_data = '{"port":%d,"name":"PyReceiver @ %s","id":"%s","width":1280,"height":960,"mirror":"h264","audio":"pcm","subtitles":"text/vtt","proxyHeaders":true,"hls":false,"upsell":true}' % (PORT, IP, IP)
 
 SAVE_TO_FILE = False
@@ -36,7 +36,8 @@ class MyTCPHandler(SocketServer.BaseRequestHandler):
 	if SAVE_TO_FILE:
             f = open('video.raw', 'wb')
         #p = Popen(['ffplay', '-framerate', '30', '-infbuf', '-framedrop', '-analyzeduration', '1', '-'], stdin=PIPE, stdout=PIPE)
-        p = Popen(['ffplay', '-probesize', '32', '-sync', 'ext', '-framerate', '30', '-'], stdin=PIPE, stdout=PIPE)
+        #p = Popen(['ffplay', '-x','1024', '-y', '768', '-probesize', '32', '-sync', 'ext', '-framerate', '30', '-'], stdin=PIPE, stdout=PIPE)
+        p = Popen(['gst-launch-1.0', 'fdsrc', '!', 'h264parse', '!', 'avdec_h264', '!', 'autovideosink'], stdin=PIPE, stdout=PIPE)
         skiped_metadata = True #False
         while True:
             data = self.request.recv(bufferSize)
