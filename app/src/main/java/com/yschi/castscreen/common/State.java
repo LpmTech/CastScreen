@@ -6,5 +6,14 @@ package com.yschi.castscreen.common;
 
 public enum State {
     STOP,
-    START
+    START;
+
+    public static State from(int state) {
+        switch (state) {
+            case 1:
+                return START;
+            default:
+                return STOP;
+        }
+    }
 }

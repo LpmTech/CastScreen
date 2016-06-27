@@ -120,4 +120,14 @@ public class DefaultCast implements ICastManager {
         mState = State.STOP;
         mParent.stopScreenCapture();
     }
+
+    @Override
+    public boolean isRecording() {
+        return State.START.equals(mState);
+    }
+
+    @Override
+    public State getState() {
+        return mState;
+    }
 }

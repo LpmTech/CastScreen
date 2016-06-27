@@ -32,10 +32,12 @@ import android.widget.EditText;
 import android.widget.Toast;
 
 import com.yschi.castscreen.R;
+import com.yschi.castscreen.common.State;
 import com.yschi.castscreen.network.wifi.IWifiBroadcastListener;
 import com.yschi.castscreen.network.wifi.WifiBroadcastReceiver;
 import com.yschi.castscreen.service.cast.CastService_;
 import com.yschi.castscreen.service.cast.ICastService;
+import com.yschi.castscreen.service.cast.ICastServiceCallback;
 import com.yschi.castscreen.service.discovery.DiscoveryBinder;
 import com.yschi.castscreen.service.discovery.DiscoveryService;
 import com.yschi.castscreen.service.discovery.DiscoveryService_;
@@ -43,6 +45,7 @@ import com.yschi.castscreen.ui.activity.AbstractBackstackProvider;
 import com.yschi.castscreen.ui.activity.AbstractControllerActivity;
 import com.yschi.castscreen.ui.activity.FragmentDescriptor;
 import com.yschi.castscreen.ui.activity.events.OnEventPushFragment;
+import com.yschi.castscreen.ui.activity.events.OnEventRecordingState;
 
 import org.greenrobot.eventbus.EventBus;
 
@@ -86,6 +89,13 @@ public class MainActivity extends AbstractControllerActivity implements IWifiBro
     private MainActivityServiceConnection mDiscoveryServiceConnection = new MainActivityServiceConnection();
     private WifiBroadcastReceiver mWifiBroadcastReceiver = new WifiBroadcastReceiver(this);
 
+    private ICastServiceCallback mCastServiceCallback = new ICastServiceCallback.Stub() {
+
+        @Override
+        public void onRecordingStateChange(int state) throws RemoteException {
+            EventBus.getDefault().post(new OnEventRecordingState(State.from(state)));
+        }
+    };
 
     public Set<String> keySet() {
         return mDiscoverdMap.keySet();
@@ -103,12 +113,14 @@ public class MainActivity extends AbstractControllerActivity implements IWifiBro
             } else /*if (service instanceof CastBinder)*/ {
                 mCastService = ICastService.Stub.asInterface(service);
 
+                registerToService();
                 checkRecordingService();
             }
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
+            unregisterFromService();
             Log.d(TAG, "Service disconnected, name: " + name);
             mCastService = null;
             mDiscoveryService = null;
@@ -161,10 +173,14 @@ public class MainActivity extends AbstractControllerActivity implements IWifiBro
         } else {
             onWifiDisconnected();
         }
+
+        registerToService();
     }
 
     @Override
     public void onPause() {
+        unregisterFromService();
+
         mWifiBroadcastReceiver.unregister(this);
 
         EventBus.getDefault().unregister(this);
@@ -302,6 +318,19 @@ public class MainActivity extends AbstractControllerActivity implements IWifiBro
         }
     }
 
+    public boolean isRecording() {
+        boolean state = false;
+
+        if(mCastService != null){
+            try {
+                state = mCastService.isRecording();
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
+        }
+        return state;
+    }
+
     private void doUnbindService() {
         if (mCastService != null) {
             mCastService = null;
@@ -336,6 +365,26 @@ public class MainActivity extends AbstractControllerActivity implements IWifiBro
             unbindService(mDiscoveryServiceConnection);
         } catch (Exception e) {
 
+        }
+    }
+
+    private void registerToService() {
+        if (mCastService != null) {
+            try {
+                mCastService.registerCallback(mCastServiceCallback);
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void unregisterFromService() {
+        if (mCastService != null) {
+            try {
+                mCastService.unregisterCallback();
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
         }
     }
 }

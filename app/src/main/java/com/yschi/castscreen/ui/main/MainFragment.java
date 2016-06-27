@@ -16,6 +16,7 @@ import android.widget.ListView;
 import com.yschi.castscreen.R;
 import com.yschi.castscreen.service.discovery.events.EventDiscoveryClient;
 import com.yschi.castscreen.ui.activity.AbstractPopableFragment;
+import com.yschi.castscreen.ui.activity.events.OnEventRecordingState;
 
 import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
@@ -96,8 +97,10 @@ public class MainFragment extends AbstractPopableFragment {
     public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
         super.onCreateOptionsMenu(menu, inflater);
 
-        if(mMainActivity.hasReceiverIpSet()) {
-            inflater.inflate(R.menu.menu_main, menu);
+        if (mMainActivity.isRecording()) {
+            inflater.inflate(R.menu.menu_stop, menu);
+        } else if (mMainActivity.hasReceiverIpSet()) {
+            inflater.inflate(R.menu.menu_start, menu);
         }
     }
 
@@ -128,6 +131,11 @@ public class MainFragment extends AbstractPopableFragment {
     @Override
     protected boolean hasList() {
         return false;
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onEvent(OnEventRecordingState event) {
+        mMainActivity.invalidateOptionsMenu();
     }
 
     @Subscribe(threadMode = ThreadMode.MAIN)

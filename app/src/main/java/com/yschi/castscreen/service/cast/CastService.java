@@ -93,6 +93,7 @@ public class CastService extends Service {
     private DefaultCast mCastManager;
     private IWriterWrapper mWriterWrapper;
 
+    private ICastServiceCallback mCastServiceCallback;
 
     private final ICastService.Stub mBinder = new ICastService.Stub() {
         @Override
@@ -103,6 +104,22 @@ public class CastService extends Service {
         @Override
         public void stopRecording() throws RemoteException {
             CastService.this.stopRecording();
+        }
+
+        @Override
+        public boolean isRecording() throws RemoteException {
+            if (mCastManager == null) return false;
+            return CastService.this.mCastManager.isRecording();
+        }
+
+        @Override
+        public void registerCallback(ICastServiceCallback listener) throws RemoteException {
+            mCastServiceCallback = listener;
+        }
+
+        @Override
+        public void unregisterCallback() throws RemoteException {
+            mCastServiceCallback = null;
         }
     };
 
@@ -277,6 +294,14 @@ public class CastService extends Service {
     @Background
     protected void drainEncoder() {
         mCastManager.startRecording();
+
+        if (mCastServiceCallback != null && mCastServiceCallback.asBinder().isBinderAlive()) {
+            try {
+                mCastServiceCallback.onRecordingStateChange(mCastManager.getState().ordinal());
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
+        }
         return;
     }
 
