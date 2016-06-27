@@ -24,15 +24,14 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
-import android.os.Handler;
 import android.os.IBinder;
-import android.os.Message;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Surface;
@@ -117,8 +116,11 @@ public class CastService extends Service {
         windowManager.getDefaultDisplay().getMetrics(metrics);
 
         _screen_dpi = metrics.densityDpi;
-        _screen_width = metrics.widthPixels / 2;
-        _screen_height = metrics.heightPixels / 2;
+        _screen_width = metrics.widthPixels;
+        _screen_height = metrics.heightPixels;
+
+        _screen_width = Math.max(_screen_height, _screen_width);
+        _screen_height = _screen_width;
 
         mMediaProjectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
         mBroadcastIntentFilter = new IntentFilter();
@@ -223,7 +225,7 @@ public class CastService extends Service {
 
         Log.d(TAG, "startRecording: " + mSelectedWidth + " " + mSelectedHeight + " " + mSelectedDpi);
         mVirtualDisplay = mMediaProjection.createVirtualDisplay("Recording Display", mSelectedWidth,
-                mSelectedHeight, mSelectedDpi, 0 /* flags */, mInputSurface,
+                mSelectedHeight, mSelectedDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR /* flags */, mInputSurface,
                 null /* callback */, null /* handler */);
 
         // Start the encoders
@@ -246,6 +248,7 @@ public class CastService extends Service {
         // Create a MediaCodec encoder and configure it. Get a Surface we can use for recording into.
         try {
             mVideoEncoder = MediaCodec.createEncoderByType(mSelectedFormat);
+
             mVideoEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             mInputSurface = mVideoEncoder.createInputSurface();
             mVideoEncoder.start();

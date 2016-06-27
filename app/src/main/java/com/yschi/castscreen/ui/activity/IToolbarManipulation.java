@@ -8,11 +8,7 @@ import android.widget.EditText;
  */
 public interface IToolbarManipulation {
 
-    void setCanTakePhoto(boolean state);
-
     void setCanEdit(boolean state);
-
-    void setToolbarImage(String image);
 
     void notifyCollapsingSetChanged();
 

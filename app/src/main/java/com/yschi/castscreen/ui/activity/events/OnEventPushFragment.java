@@ -2,7 +2,7 @@ package com.yschi.castscreen.ui.activity.events;
 
 import android.os.Bundle;
 
-import eu.codlab.cypherx.ui._abstract.FragmentDescriptor;
+import com.yschi.castscreen.ui.activity.FragmentDescriptor;
 
 /**
  * Created by kevinleperf on 25/03/16.

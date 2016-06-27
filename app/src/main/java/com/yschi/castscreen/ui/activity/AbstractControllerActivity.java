@@ -23,21 +23,17 @@ import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Toast;
 
+import com.yschi.castscreen.R;
+import com.yschi.castscreen.ui.activity.events.OnEventPopFragment;
+import com.yschi.castscreen.ui.activity.events.OnEventPushFragment;
+
 import org.androidannotations.annotations.EActivity;
+import org.greenrobot.eventbus.EventBus;
+import org.greenrobot.eventbus.Subscribe;
+import org.greenrobot.eventbus.ThreadMode;
 
 import butterknife.Bind;
 import butterknife.ButterKnife;
-import de.greenrobot.event.EventBus;
-import de.greenrobot.event.Subscribe;
-import de.greenrobot.event.ThreadMode;
-import eu.codlab.cypherx.R;
-import eu.codlab.cypherx.ui._abstract.AbstractBackstackController;
-import eu.codlab.cypherx.ui._abstract.AbstractBackstackProvider;
-import eu.codlab.cypherx.ui._abstract.FragmentDescriptor;
-import eu.codlab.cypherx.ui._abstract.IToolbarManipulation;
-import eu.codlab.cypherx.ui.events.OnEventAwaitingPhotos;
-import eu.codlab.cypherx.ui.events.OnEventPopFragment;
-import eu.codlab.cypherx.ui.events.OnEventPushFragment;
 
 @EActivity
 public abstract class AbstractControllerActivity extends AppCompatActivity
@@ -50,10 +46,6 @@ public abstract class AbstractControllerActivity extends AppCompatActivity
 
     @Bind(R.id.toolbar)
     Toolbar mToolbar;
-
-    @Nullable
-    @Bind(R.id.drawerLayout)
-    protected DrawerLayout mDrawerLayout;
 
     private Handler mHandler;
     private AbstractBackstackController sBackstackController;
@@ -95,34 +87,7 @@ public abstract class AbstractControllerActivity extends AppCompatActivity
         getSupportActionBar().setDisplayHomeAsUpEnabled(true);
         getSupportActionBar().setHomeButtonEnabled(true);
 
-        if (mDrawerLayout != null) {
-            _actionbar_toggle = new ActionBarDrawerToggle(
-                    this,
-                    mDrawerLayout,         /* DrawerLayout object */
-                    getToolbar(),
-                    0,
-                    0) {
-
-                /**
-                 * Called when a drawer has settled in a completely closed state.
-                 */
-                public void onDrawerClosed(View view) {
-                    super.onDrawerClosed(view);
-                }
-
-                /**
-                 * Called when a drawer has settled in a completely open state.
-                 */
-                public void onDrawerOpened(View drawerView) {
-                    super.onDrawerOpened(drawerView);
-                    hideKeyboard(mDrawerLayout);
-                }
-            };
-            mDrawerLayout.setDrawerListener(_actionbar_toggle);
-        }
-
         setupToolbar();
-        setupDrawer();
     }
 
     @Override
@@ -149,7 +114,9 @@ public abstract class AbstractControllerActivity extends AppCompatActivity
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
 
-        _actionbar_toggle.onConfigurationChanged(newConfig);
+        if(_actionbar_toggle != null) {
+            _actionbar_toggle.onConfigurationChanged(newConfig);
+        }
     }
 
     @Override
@@ -189,20 +156,16 @@ public abstract class AbstractControllerActivity extends AppCompatActivity
         }*/
     }
 
-    @Subscribe(threadMode = ThreadMode.MainThread)
+    @Subscribe(threadMode = ThreadMode.MAIN)
     public void onEvent(OnEventPushFragment event) {
         sBackstackController.push(event.getType().ordinal(),
                 event.getData());
         Toast.makeText(this, "ee", Toast.LENGTH_SHORT).show();
     }
 
-    @Subscribe(threadMode = ThreadMode.MainThread)
+    @Subscribe(threadMode = ThreadMode.MAIN)
     public void onEvent(OnEventPopFragment event) {
         sBackstackController.pop();
-    }
-
-    public void setLeftMenu(boolean activated) {
-        setDrawerState(activated);
     }
 
     public void setBackable(boolean backable) {
@@ -224,45 +187,10 @@ public abstract class AbstractControllerActivity extends AppCompatActivity
 
     private boolean back() {
         if (sBackstackController.canPop()) {
-            EventBus.getDefault().removeStickyEvent(OnEventAwaitingPhotos.class);
-
             sBackstackController.pop();
             return true;
         }
         return false;
-    }
-
-    private boolean isDrawerOpen() {
-        return mDrawerLayout != null && mDrawerLayout.isDrawerOpen(GravityCompat.START);
-    }
-
-    protected void setupDrawer() {
-        if (mDrawerLayout != null) {
-            getToolbar().setNavigationOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    manageToolbarButton();
-                }
-            });
-        }
-    }
-
-    public void closeDrawer() {
-        if (mDrawerLayout != null)
-            mDrawerLayout.closeDrawer(GravityCompat.START);
-    }
-
-    public void setDrawerState(boolean activated) {
-        if (mDrawerLayout != null) {
-            mDrawerLayout.setActivated(activated);
-            if (activated) {
-                mDrawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED);
-            } else {
-                mDrawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED);
-            }
-            if (!activated)
-                mDrawerLayout.closeDrawer(GravityCompat.START);
-        }
     }
 
     protected void setupToolbar() {
@@ -288,15 +216,8 @@ public abstract class AbstractControllerActivity extends AppCompatActivity
         boolean managed = false;
 
         FragmentDescriptor fragments = FragmentDescriptor.from(sBackstackController.getHead());
-        if (mDrawerLayout != null && fragments.isLeftMenu()) {
-            if (mDrawerLayout.isDrawerOpen(GravityCompat.START)) {
-                mDrawerLayout.closeDrawer(GravityCompat.START);
-                managed = true;
-            } else {
-                mDrawerLayout.openDrawer(GravityCompat.START);
-            }
-            //mDrawerLayout.openDrawer(GravityCompat.START);
-        } else if (fragments.isBackable()) {
+
+        if (fragments.isBackable()) {
             managed = back();
         }
 
@@ -307,11 +228,6 @@ public abstract class AbstractControllerActivity extends AppCompatActivity
 
     private void updateToolbarButton() {
         FragmentDescriptor fragments = FragmentDescriptor.from(sBackstackController.getHead());
-
-        if (mDrawerLayout != null) {
-            if (fragments == null || fragments.isLeftMenu())
-                mToolbar.setNavigationIcon(R.drawable.ic_menu_white);
-        }
     }
 
     private void updateWindow() {

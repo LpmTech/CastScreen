@@ -5,8 +5,9 @@ import android.support.v4.BuildConfig;
 import android.support.v4.app.Fragment;
 import android.view.View;
 
-import de.greenrobot.event.EventBus;
-import eu.codlab.cypherx.R;
+import com.yschi.castscreen.R;
+
+import org.greenrobot.eventbus.EventBus;
 
 /**
  * Created by kevinleperf on 23/03/16.
@@ -49,10 +50,7 @@ public abstract class AbstractPopableFragment extends Fragment {
             }
         }
 
-        getListener().setCanTakePhoto(canTakePhoto());
         getListener().setCanEdit(canEdit());
-
-        getListener().setToolbarImage(getImage());
 
         String title = getTitle();
 
@@ -76,11 +74,7 @@ public abstract class AbstractPopableFragment extends Fragment {
     }
 
 
-    protected abstract boolean canTakePhoto();
-
     protected abstract boolean canEdit();
-
-    protected abstract String getImage();
 
     protected abstract String getTitle();
 

@@ -13,6 +13,7 @@
         android:layout_weight="1" />
 
     <LinearLayout
+        android:id="@+id/discover_waiting"
         android:layout_width="100dp"
         android:layout_height="wrap_content"
         android:layout_gravity="center_horizontal|center_vertical"
@@ -29,6 +30,6 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:text="@string/waiting_for_wifi" />
+            android:text="@string/waiting_for_receiver" />
     </LinearLayout>
 </FrameLayout>

@@ -85,7 +85,6 @@ public class DefaultCast implements ICastManager {
                     if (mVideoBufferInfo.size != 0) {
                         encodedData.position(mVideoBufferInfo.offset);
                         encodedData.limit(mVideoBufferInfo.offset + mVideoBufferInfo.size);
-
                     }
                     if (mWriterWrapper.valid()) {
                         try {

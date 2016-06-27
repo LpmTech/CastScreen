@@ -2,9 +2,9 @@ package com.yschi.castscreen.ui.main;
 
 import android.os.Bundle;
 
-import eu.codlab.cypherx.ui._abstract.AbstractBackstackProvider;
-import eu.codlab.cypherx.ui._abstract.AbstractPopableFragment;
-import eu.codlab.cypherx.ui._abstract.FragmentDescriptor;
+import com.yschi.castscreen.ui.activity.AbstractBackstackProvider;
+import com.yschi.castscreen.ui.activity.AbstractPopableFragment;
+import com.yschi.castscreen.ui.activity.FragmentDescriptor;
 
 /**
  * Created by kevinleperf on 23/03/16.

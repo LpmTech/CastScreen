@@ -9,6 +9,8 @@
     <string name="casting_screen">Casting screen</string>
     <string name="user_cancelled">User cancelled</string>
     <string name="server_mode">Server mode</string>
+    <string name="waiting_for_wifi">Please connect to a Wifi Network</string>
+    <string name="waiting_for_receiver">Waiting for receiver</string>
 
     <string-array name="format_options">
         <item>H264</item>

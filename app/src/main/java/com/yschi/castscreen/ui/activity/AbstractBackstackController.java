@@ -8,8 +8,6 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 
-import eu.codlab.cypherx.ui._abstract.activity.AbstractControllerActivity;
-
 /**
  * Created by kevinleperf on 23/03/16.
  */
@@ -79,7 +77,6 @@ public abstract class AbstractBackstackController {
             fragment = mProvider.createFragment(mId, mDatas.get(id));
         }
 
-        mActivityReference.get().setLeftMenu(isRepresentingValueLeftMenu(mId));
         mActivityReference.get().setBackable(isRepresentingValueBackable(mId));
         mFragmentManager
                 .beginTransaction()

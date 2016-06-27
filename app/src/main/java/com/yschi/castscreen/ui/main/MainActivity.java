@@ -29,11 +29,7 @@ import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
-import android.widget.ListView;
-import android.widget.Spinner;
-import android.widget.TextView;
+import android.widget.EditText;
 import android.widget.Toast;
 
 import com.yschi.castscreen.R;
@@ -43,16 +39,16 @@ import com.yschi.castscreen.service.cast.CastService_;
 import com.yschi.castscreen.service.discovery.DiscoveryBinder;
 import com.yschi.castscreen.service.discovery.DiscoveryService;
 import com.yschi.castscreen.service.discovery.DiscoveryService_;
-import com.yschi.castscreen.service.discovery.events.EventDiscoveryClient;
+import com.yschi.castscreen.ui.activity.AbstractBackstackProvider;
+import com.yschi.castscreen.ui.activity.AbstractControllerActivity;
 
 import org.greenrobot.eventbus.EventBus;
-import org.greenrobot.eventbus.Subscribe;
-import org.greenrobot.eventbus.ThreadMode;
 
 import java.util.HashMap;
+import java.util.Set;
 
 
-public class MainActivity extends Activity {
+public class MainActivity extends AbstractControllerActivity {
     private static final String TAG = "MainActivity";
 
     private static final String PREF_COMMON = "common";
@@ -60,7 +56,6 @@ public class MainActivity extends Activity {
     private static final String PREF_KEY_BITRATE = "bitrate";
 
     private static final int[] BITRATE_OPTIONS = {
-            12288000, // 12 Mbps
             6144000, // 6 Mbps
             4096000, // 4 Mbps
             2048000, // 2 Mbps
@@ -73,10 +68,7 @@ public class MainActivity extends Activity {
 
     private Context mContext;
     private MediaProjectionManager mMediaProjectionManager;
-    private TextView mReceiverTextView;
 
-    private ListView mDiscoverListView;
-    private ArrayAdapter<String> mDiscoverAdapter;
     private HashMap<String, String> mDiscoverdMap;
 
     private int mSelectedBitrate = BITRATE_OPTIONS[0];
@@ -89,6 +81,10 @@ public class MainActivity extends Activity {
 
     private MainActivityServiceConnection mServiceConnection = new MainActivityServiceConnection();
     private MainActivityServiceConnection mDiscoveryServiceConnection = new MainActivityServiceConnection();
+
+    public Set<String> keySet() {
+        return mDiscoverdMap.keySet();
+    }
 
     class MainActivityServiceConnection implements ServiceConnection {
         @Override
@@ -118,6 +114,11 @@ public class MainActivity extends Activity {
 
 
     @Override
+    protected AbstractBackstackProvider createAbstractBackstackProvider() {
+        return new DefaultBackstackProvider();
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
@@ -131,47 +132,8 @@ public class MainActivity extends Activity {
         mMediaProjectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
 
         mDiscoverdMap = new HashMap<>();
-        mDiscoverListView = (ListView) findViewById(R.id.discover_listview);
-        mDiscoverAdapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_list_item_1);
-        mDiscoverAdapter.addAll(mDiscoverdMap.keySet());
-        mDiscoverListView.setAdapter(mDiscoverAdapter);
-        mDiscoverListView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            @Override
-            public void onItemClick(AdapterView<?> adapterView, View view, int i, long l) {
-                String name = mDiscoverAdapter.getItem(i);
-                String ip = mDiscoverdMap.get(name);
-                Log.d(TAG, "Select receiver name: " + name + ", ip: " + ip);
-                mReceiverIp = ip;
-                updateReceiverStatus();
-                mContext.getSharedPreferences(PREF_COMMON, 0).edit().putString(PREF_KEY_RECEIVER, mReceiverIp).commit();
-            }
-        });
-
-        mReceiverTextView = (TextView) findViewById(R.id.receiver_textview);
-
-        Spinner bitrateSpinner = (Spinner) findViewById(R.id.bitrate_spinner);
-        ArrayAdapter<CharSequence> bitrateAdapter = ArrayAdapter.createFromResource(this,
-                R.array.bitrate_options, android.R.layout.simple_spinner_item);
-        bitrateAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        bitrateSpinner.setAdapter(bitrateAdapter);
-        bitrateSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
-                mSelectedBitrate = BITRATE_OPTIONS[i];
-                mContext.getSharedPreferences(PREF_COMMON, 0).edit().putInt(PREF_KEY_BITRATE, i).commit();
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> adapterView) {
-                mSelectedBitrate = BITRATE_OPTIONS[0];
-                mContext.getSharedPreferences(PREF_COMMON, 0).edit().putInt(PREF_KEY_BITRATE, 0).commit();
-            }
-        });
-        bitrateSpinner.setSelection(mContext.getSharedPreferences(PREF_COMMON, 0).getInt(PREF_KEY_BITRATE, 0));
 
         mReceiverIp = mContext.getSharedPreferences(PREF_COMMON, 0).getString(PREF_KEY_RECEIVER, "");
-        updateReceiverStatus();
 
         checkRecordingService();
     }
@@ -255,21 +217,45 @@ public class MainActivity extends Activity {
         }
     }
 
-    @Subscribe(threadMode = ThreadMode.MAIN)
-    public void onEvent(EventDiscoveryClient event) {
-        if (event != null) {
-            mDiscoverdMap.put(event.getName(), event.getIp());
-            mDiscoverAdapter.clear();
-            mDiscoverAdapter.addAll(mDiscoverdMap.keySet());
-        }
+    /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+     * Controller Overrides
+     * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+
+    @Override
+    public void setCanEdit(boolean state) {
+
     }
 
-    private void updateReceiverStatus() {
-        if (mReceiverIp.length() > 0) {
-            mReceiverTextView.setText(String.format(mContext.getString(R.string.receiver), mReceiverIp));
-        } else {
-            mReceiverTextView.setText(R.string.no_receiver);
-        }
+    @Override
+    public void notifyCollapsingSetChanged() {
+
+    }
+
+    @Override
+    public void setEditTextFocusListenerFor(EditText edit_text) {
+
+    }
+
+    @Override
+    public void scrollTo(View view) {
+
+    }
+
+    @Override
+    public int getExpandableHeight() {
+        return 0;
+    }
+
+    public void setReceiverName(String name) {
+        String ip = mDiscoverdMap.get(name);
+        Log.d(TAG, "Select receiver name: " + name + ", ip: " + ip);
+        mReceiverIp = ip;
+        mContext.getSharedPreferences(PREF_COMMON, 0).edit().putString(PREF_KEY_RECEIVER, mReceiverIp).commit();
+    }
+
+    public void put(String name, String ip) {
+        mDiscoverdMap.put(name, ip);
     }
 
     private void startCaptureScreen() {

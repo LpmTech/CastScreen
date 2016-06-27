@@ -1,17 +1,19 @@
 package com.yschi.castscreen.ui.activity;
 
 import android.content.Context;
+import android.util.Log;
 
-import eu.codlab.cypherx.ui.main.MainFragment;
-import eu.codlab.cypherx.ui.user.UserFragment;
+import com.yschi.castscreen.ui.main.MainFragment;
+import com.yschi.castscreen.ui.main.WaitingWifiFragment;
 
 /**
  * Created by kevinleperf on 23/03/16.
  */
 public enum FragmentDescriptor {
-    MAIN(BackType.LEFT_MENU, ToolbarType.EXPANDABLE, MainFragment.class, null, false),
-    USER(BackType.BACK, ToolbarType.EXPANDABLE, UserFragment.class, null, false);
+    MAIN(BackType.NONE, ToolbarType.EXPANDABLE, MainFragment.class, null, false),
+    WIFI(BackType.NONE, ToolbarType.EXPANDABLE, WaitingWifiFragment.class, null, false);
 
+    private final static String TAG = FragmentDescriptor.class.getSimpleName();
     private BackType mBackType;
     private ToolbarType mToolbarScrollable;
     private boolean mRefreshEnabled;
@@ -32,9 +34,10 @@ public enum FragmentDescriptor {
     }
 
     public static FragmentDescriptor from(int id) {
+        Log.d(TAG, "from: " + id);
         switch (id) {
             case 1:
-                return USER;
+                return WIFI;
             default:
                 return MAIN;
         }
